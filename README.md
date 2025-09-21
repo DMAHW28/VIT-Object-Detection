@@ -34,7 +34,6 @@ Le modèle Vit-Tiny a été entraîné, les performances sur le jeu de test sont
 - Accuracy : 94 %
 - IoU: 0.8726
 - DIoU: 0.8717
-- GIoU: 1.6045
 - F1-score: 0.87
 
 ## Détection
