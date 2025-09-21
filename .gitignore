@@ -1,0 +1,22 @@
+# IDE
+.idea/
+
+# Dataset
+database/101_ObjectCategories
+database/Annotations
+
+# assets
+assets/detection.png
+
+# Modèles lourds
+models/detector_model.pth
+models/detector_model_pret.pth
+models/detector_model_vit.pth
+
+# Source Files
+src/dataset_copy.py
+src/model.py
+
+# Notebooks
+eval_vit_.ipynb
+train_vit_.ipynb

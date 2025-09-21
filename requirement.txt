@@ -1,0 +1,7 @@
+torch
+torchvision
+albumentations
+numpy
+pandas
+seaborn
+scipy
