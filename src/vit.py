@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from collections import OrderedDict
 
 class Patches(nn.Module):
     def __init__(self, patch_size):
@@ -15,132 +16,216 @@ class Patches(nn.Module):
         return patches
 
 class FeedForward(nn.Module):
-    def __init__(self, d_model, d_ff, dropout=0.25):
+    def __init__(self, hidden_dim, mlp_dim, dropout=0.25):
         super().__init__()
         self.feature_extractor = nn.Sequential(
-            nn.Linear(d_model, d_ff),
+            nn.Linear(hidden_dim, mlp_dim),
             nn.GELU(),
-            nn.Linear(d_ff, d_model),
+            nn.Linear(mlp_dim, hidden_dim),
             nn.Dropout(dropout),
         )
     def forward(self, x):
         return self.feature_extractor(x)
 
-class TransformerEncoderLay(nn.Module):
-    def __init__(self, params):
+class EncoderBlock(nn.Module):
+    def __init__(
+        self,
+        num_heads,
+        hidden_dim,
+        mlp_dim,
+        dropout,
+        attention_dropout,
+        ln_epsilon,
+    ):
         super().__init__()
-        self.d_model = params["d_model"]
-        self.num_heads = params["num_heads"]
-        self.d_ff = params["d_ff"]
-        self.ff_dropout = params["ff_dropout_rate"]
-        self.epsilon = params["ln_epsilon"]
-        self.norm1 = nn.LayerNorm(self.d_model, eps=self.epsilon)
-        self.norm2 = nn.LayerNorm(self.d_model, eps=self.epsilon)
-        self.attention_extractor = nn.MultiheadAttention(
-            embed_dim=self.d_model,
-            num_heads=self.num_heads,
-            dropout=self.ff_dropout,
+        self.norm1 = nn.LayerNorm(hidden_dim, eps=ln_epsilon)
+        self.self_attention = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=num_heads,
+            dropout=attention_dropout,
             batch_first=True,
         )
-        self.ff = FeedForward(d_model=self.d_model, d_ff=self.d_ff, dropout=self.ff_dropout)
+        self.dropout = nn.Dropout(dropout)
+        self.norm2 = nn.LayerNorm(hidden_dim, eps=ln_epsilon)
+        self.mlp = FeedForward(hidden_dim=hidden_dim, mlp_dim=mlp_dim, dropout=dropout)
 
     def forward(self, x):
-        attn_output, _ = self.attention_extractor(query=self.norm1(x), key=self.norm1(x), value=self.norm1(x))
-        x = x + attn_output
-        x = x + self.ff(self.norm2(x))
-        return x
+        h = self.norm1(x)
+        h, _ = self.self_attention(h, h, h, need_weights=False)
+        h = self.dropout(h)
+        h = h + x
+        hh = self.norm2(h)
+        hh = self.mlp(hh)
+        return h + hh
 
+class Encoder(nn.Module):
+    def __init__(
+        self,
+        seq_length: int,
+        num_layers: int,
+        num_heads: int,
+        hidden_dim: int,
+        mlp_dim: int,
+        dropout: float = 0.0,
+        attention_dropout: float = 0.0,
+        ln_epsilon: float = 1e-6,
+    ):
+        super().__init__()
+        self.position_encoding = nn.Parameter(torch.empty(1, seq_length, hidden_dim).normal_(std=0.02))
+        self.dropout = nn.Dropout(dropout)
+        layers = OrderedDict()
+        for i in range(num_layers):
+            layers[f"encoder_layer_{i}"] = EncoderBlock(
+                num_heads,
+                hidden_dim,
+                mlp_dim,
+                dropout,
+                attention_dropout,
+                ln_epsilon
+            )
+        self.layers = nn.Sequential(layers)
+        self.norm = nn.LayerNorm(hidden_dim, eps=ln_epsilon)
 
-class VitDetector(nn.Module):
+    def forward(self, x):
+        x = x + self.position_encoding
+        return self.norm(self.layers(self.dropout(x)))
+
+class ViT(nn.Module):
     def __init__(self, params):
         super().__init__()
-        self.patcher = Patches(params["patch_size"])
-        self.d_model = params["d_model"]
-        self.n_layers = params["n_layers"]
-        self.input_shape = params["input_shape"]
-        self.n_patches = params["n_patches"]
-        self.n_classes = params["n_classes"]
+        self.image_size = params.get("image_size", 224)
+        self.patch_size = params.get("patch_size", 16)
+        self.hidden_dim = params.get("hidden_dim", 192)
+        self.mlp_dim = params.get("mlp_dim", 768)
+        self.attention_dropout = params.get("attention_dropout", 0.0)
+        self.dropout = params.get("dropout", 0.0)
+        self.num_classes = params.get("num_classes", 3)
+        self.num_layers = params.get("num_layers", 12)
+        self.num_heads = params.get("num_heads", 3)
+        self.ln_epsilon = params.get("ln_epsilon", 1e-5)
 
-        # --------------LINEAR PROJECTION---------------
-        self.linear_projection = nn.Linear(self.input_shape, self.d_model)
+        seq_length = (self.image_size // self.patch_size) ** 2
+        self.conv_proj = nn.Conv2d(3, self.hidden_dim, kernel_size=self.patch_size, stride=self.patch_size)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.hidden_dim))
 
-        # --------------EMBEDDING POSITION---------------
-        self.cls_token = nn.Parameter(torch.randn(1, 1, self.d_model))
-        self.position_encoding = nn.Embedding(self.n_patches + 1, self.d_model)
+        self.encoder = Encoder(
+            seq_length+1,
+            self.num_layers,
+            self.num_heads,
+            self.hidden_dim,
+            self.mlp_dim,
+            self.dropout,
+            self.attention_dropout,
+            self.ln_epsilon
+        )
 
-        # --------------TRANSFORMER---------------
-        self.transformer = nn.Sequential(*[TransformerEncoderLay(params) for _ in range(self.n_layers)])
-
-        # --------------PREDICTION---------------
-        self.cls_head = nn.Linear(self.d_model, self.n_classes)
-        self.boxes_head = nn.Linear(self.d_model, 4)
+        self.cls_head = nn.Linear(self.hidden_dim, self.num_classes)
+        self.box_head = nn.Linear(self.hidden_dim, 4)
 
     def forward(self, x):
-        B = x.size(0)
+        b, c, h, w = x.shape
+        n_h = h // self.patch_size
+        n_w = w // self.patch_size
+
+        x = self.conv_proj(x)
+        x = x.reshape(b, self.hidden_dim, n_h * n_w)
+        x = x.permute(0, 2, 1)
+        cls_tokens = self.cls_token.expand(b, -1, -1)
+        x = torch.cat([cls_tokens, x], dim=1)
+
+        x = self.encoder(x)
+        x = x[:, 0]
+        cls_out = self.cls_head(x)
+        box_out = self.box_head(x)
+        return cls_out, box_out
+
+class ViTP(nn.Module):
+    def __init__(self, params):
+        super().__init__()
+        self.image_size = params.get("image_size", 224)
+        self.patch_size = params.get("patch_size", 16)
+        self.hidden_dim = params.get("hidden_dim", 192)
+        self.mlp_dim = params.get("mlp_dim", 768)
+        self.attention_dropout = params.get("attention_dropout", 0.0)
+        self.dropout = params.get("dropout", 0.0)
+        self.num_classes = params.get("num_classes", 3)
+        self.num_layers = params.get("num_layers", 12)
+        self.num_heads = params.get("num_heads", 3)
+        self.ln_epsilon = params.get("ln_epsilon", 1e-5)
+
+        seq_length = (self.image_size // self.patch_size) ** 2
+        self.patcher = Patches(self.patch_size)
+        self.linear_projection = nn.Linear(3 * (self.patch_size ** 2), self.hidden_dim)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.hidden_dim))
+
+        self.encoder = Encoder(
+            seq_length + 1,
+            self.num_layers,
+            self.num_heads,
+            self.hidden_dim,
+            self.mlp_dim,
+            self.dropout,
+            self.attention_dropout,
+            self.ln_epsilon
+        )
+
+        self.cls_head = nn.Linear(self.hidden_dim, self.num_classes)
+        self.boxes_head = nn.Linear(self.hidden_dim, 4)
+
+    def forward(self, x):
+        b, c, h, w = x.shape
+
         x = self.patcher(x)
         x = self.linear_projection(x)
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
-        pos_emb = self.position_encoding(torch.arange(x.shape[1], device=x.device))
-        x = x + pos_emb
-        x = self.transformer(x)
-        cls_tokens = x[:, 0]
-        cls_out = self.cls_head(cls_tokens)
-        box_out = self.boxes_head(cls_tokens)
+        cls_tokens = self.cls_token.expand(b, -1, -1)
+        x = torch.cat([cls_tokens, x], dim=1)
+
+        x = self.encoder(x)
+        x = x[:, 0]
+        cls_out = self.cls_head(x)
+        box_out = self.boxes_head(x)
         return cls_out, box_out
 
 if __name__ == "__main__":
     # --------------PATCHES---------------
-    img_size = 224
+    image_size = 224
     patch_size = 16
-    n_patches = (img_size * img_size) // (patch_size * patch_size)
 
-    # --------------TRANSFORMER---------------
-    input_shape = patch_size * patch_size * 3
-    d_model = 192
+    # --------------TRANSFORMER ENCODER---------------
+    hidden_dim = 192
     num_heads = 3
-    n_layers = 12
+    num_layers = 12
     ln_epsilon = 1e-5
-    d_ff = d_model * 4
-    ff_dropout_rate = 0.25
+    mlp_dim = hidden_dim * 4
+    dropout = 0.0
+    attention_dropout = 0.0
 
-    # --------------PREDICTION---------------
+    # --------------CLASSES---------------
     num_classes = 3
-    cls_head_activation = "gelu"
-    cls_head_layers_units = [2048, 1024, 512, 64, 32]
-    cls_head_layers_dropout = [0.25, 0.25, 0.25, 0.25, 0.25]
 
     params = {
         "patch_size": patch_size,
-        "n_patches": n_patches,
-
-        "input_shape": input_shape,
-        "d_model": d_model,
+        "image_size": image_size,
+        "hidden_dim": hidden_dim,
         "num_heads": num_heads,
-        "n_layers": n_layers,
+        "num_layers": num_layers,
         "ln_epsilon": ln_epsilon,
-        "d_ff": d_ff,
-        "ff_dropout_rate": ff_dropout_rate,
-
-        "n_classes": num_classes,
-        "cls_head_activation": cls_head_activation,
-        "cls_head_layers_units": cls_head_layers_units,
-        "cls_head_layers_dropout": cls_head_layers_dropout
+        "mlp_dim": mlp_dim,
+        "dropout": dropout,
+        "attention_dropout": attention_dropout,
+        "num_classes": num_classes,
     }
 
-    model = VitDetector(params)
-    x = torch.randn((1, 3, img_size, img_size))
+    model = ViT(params)
+    print(model)
+    x = torch.randn((1, 3, image_size, image_size))
     cls_out, box_out = model(x)
     print(box_out.shape, cls_out.shape)
-    print(sum([torch.numel(para) for para in model.parameters()]))
+    print(f"{sum([torch.numel(p) for p in model.parameters()]):,} parameters")
 
-
-"""
-| Modèle                   | Dim. des embeddings | Têtes d’attention | Profondeur (couches) | Paramètres |
-| ------------------------ | ------------------- | ----------------- | -------------------- | ---------- |
-| **ViT-Tiny (ViT-Ti/16)** | 192                 | 3                 | 12                   | \~5.7M     |
-| **ViT-Small (ViT-S/16)** | 384                 | 6                 | 12                   | \~22M      |
-| **ViT-Base (ViT-B/16)**  | 768                 | 12                | 12                   | \~86M      |
-| **ViT-Large (ViT-L/16)** | 1024                | 16                | 24                   | \~307M     |
-| **ViT-Huge (ViT-H/14)**  | 1280                | 16                | 32                   | \~632M     |
-"""
+    model = ViTP(params)
+    print(model)
+    x = torch.randn((1, 3, image_size, image_size))
+    cls_out, box_out = model(x)
+    print(box_out.shape, cls_out.shape)
+    print(f"{sum([torch.numel(p) for p in model.parameters()]):,} parameters")

@@ -2,8 +2,7 @@
 .idea/
 
 # Dataset
-database/101_ObjectCategories
-database/Annotations
+database/
 
 # assets
 assets/detection.png
