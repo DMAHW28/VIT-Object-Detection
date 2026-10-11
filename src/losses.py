@@ -15,24 +15,6 @@ def bbox_iou(box1, box2, eps=1e-7):
 
     return inter_area / union
 
-def bbox_giou(box1, box2, eps=1e-7):
-    iou = bbox_iou(box1, box2, eps)
-
-    c_x1 = torch.min(box1[:, 0], box2[:, 0])
-    c_y1 = torch.min(box1[:, 1], box2[:, 1])
-    c_x2 = torch.max(box1[:, 2], box2[:, 2])
-    c_y2 = torch.max(box1[:, 3], box2[:, 3])
-
-    c_area = (c_x2 - c_x1) * (c_y2 - c_y1)
-
-    area1 = (box1[:, 2] - box1[:, 0]) * (box1[:, 3] - box1[:, 1])
-    area2 = (box2[:, 2] - box2[:, 0]) * (box2[:, 3] - box2[:, 1])
-    inter_area = iou * (area1 + area2 - iou)
-    union = area1 + area2 - inter_area
-
-    giou = iou - ((c_area - union) / (c_area + eps))
-    return giou
-
 def bbox_diou(box1, box2, eps=1e-7):
     iou = bbox_iou(box1, box2, eps)
 
@@ -58,10 +40,6 @@ def bbox_diou(box1, box2, eps=1e-7):
 class IoULoss(nn.Module):
     def forward(self, pred_boxes, target_boxes):
         return 1 - bbox_iou(pred_boxes, target_boxes).mean()
-
-class GIoULoss(nn.Module):
-    def forward(self, pred_boxes, target_boxes):
-        return 1 - bbox_giou(pred_boxes, target_boxes).mean()
 
 class DIoULoss(nn.Module):
     def forward(self, pred_boxes, target_boxes):

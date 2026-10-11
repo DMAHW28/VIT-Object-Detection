@@ -9,9 +9,7 @@ database/Annotations
 assets/detection.png
 
 # Modèles lourds
-models/detector_model.pth
-models/detector_model_pret.pth
-models/detector_model_vit.pth
+models/
 
 # Source Files
 src/dataset_copy.py
@@ -20,3 +18,7 @@ src/model.py
 # Notebooks
 eval_vit_.ipynb
 train_vit_.ipynb
+
+**/__pycache__
+**/.DS_Store
+.DS_Store

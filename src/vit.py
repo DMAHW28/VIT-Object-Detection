@@ -14,30 +14,6 @@ class Patches(nn.Module):
         patches = torch.flatten(patches, start_dim = 2, end_dim = -1)
         return patches
 
-class LinearLayer(nn.Module):
-    def __init__(self, in_features, out_features, dropout_rate=None, activation="relu"):
-        super().__init__()
-        self.linear = nn.Linear(in_features, out_features)
-        if activation == "relu":
-            self.activation = nn.ReLU()
-        elif activation == "leaky_relu":
-            self.activation = nn.LeakyReLU()
-        elif activation == 'gelu':
-            self.activation = nn.GELU()
-        else:
-            self.activation = None
-        self.dropout = None
-        if dropout_rate is not None:
-            self.dropout = nn.Dropout(dropout_rate)
-
-    def forward(self, x):
-        x = self.linear(x)
-        if self.activation is not None:
-            x = self.activation(x)
-        if self.dropout is not None:
-            x = self.dropout(x)
-        return x
-
 class FeedForward(nn.Module):
     def __init__(self, d_model, d_ff, dropout=0.25):
         super().__init__()
@@ -49,25 +25,6 @@ class FeedForward(nn.Module):
         )
     def forward(self, x):
         return self.feature_extractor(x)
-
-class ClsHead(nn.Module):
-    def __init__(self, params):
-        super().__init__()
-        self.activation = params["cls_head_activation"]
-        self.layers_units = params["cls_head_layers_units"]
-        self.layers_dropout = params["cls_head_layers_dropout"]
-
-        self.projection = nn.ModuleList()
-        for i, (u, d) in enumerate(zip(self.layers_units, self.layers_dropout)):
-            out_features = u
-            in_features = self.layers_units[i - 1] if i > 0 else params["d_model"]
-            activation = self.activation
-            self.projection.append(LinearLayer(in_features=in_features, out_features=out_features, dropout_rate=d, activation=activation))
-
-    def forward(self, x):
-        for layer in self.projection:
-            x = layer(x)
-        return x
 
 class TransformerEncoderLay(nn.Module):
     def __init__(self, params):
@@ -88,13 +45,11 @@ class TransformerEncoderLay(nn.Module):
         self.ff = FeedForward(d_model=self.d_model, d_ff=self.d_ff, dropout=self.ff_dropout)
 
     def forward(self, x):
-        x = self.norm1(x)
-        attn_output, _ = self.attention_extractor( query = x, key = x, value = x)
+        attn_output, _ = self.attention_extractor(query=self.norm1(x), key=self.norm1(x), value=self.norm1(x))
         x = x + attn_output
-        x = self.norm2(x)
-        ff_output = self.ff(x)
-        x = x + ff_output
+        x = x + self.ff(self.norm2(x))
         return x
+
 
 class VitDetector(nn.Module):
     def __init__(self, params):
@@ -110,7 +65,7 @@ class VitDetector(nn.Module):
         self.linear_projection = nn.Linear(self.input_shape, self.d_model)
 
         # --------------EMBEDDING POSITION---------------
-        self.register_parameter(name='cls_token', param=torch.nn.Parameter(torch.randn(1, 1, self.d_model)))
+        self.cls_token = nn.Parameter(torch.randn(1, 1, self.d_model))
         self.position_encoding = nn.Embedding(self.n_patches + 1, self.d_model)
 
         # --------------TRANSFORMER---------------
