@@ -27,17 +27,13 @@ train_transform = A.Compose([
     ),
     A.ColorJitter(p=0.5),
     A.MotionBlur(p=0.2),
-    # A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-    # A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)),
-    A.Normalize(mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5)),
+    A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)),
     ToTensorV2()
 ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
 
 test_transform = A.Compose([
     A.Resize(I_SIZE, I_SIZE),
-    A.Normalize(mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5)),
-    # A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-    # A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)),
+    A.Normalize(mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0)),
     ToTensorV2()
 ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']))
 
@@ -92,5 +88,3 @@ class AirPlaneData:
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
         return train_loader, test_loader
-
-# /Users/liamdro/PycharmProjects/AirPlaneDetection/database/101_ObjectCategories/airplanes/image_0118.jpg airplanes

@@ -1,4 +1,5 @@
 import os
+import collections
 from sklearn.model_selection import train_test_split
 
 project_path = os.path.abspath('.')
@@ -28,12 +29,10 @@ def create_txt_data_torch_format(test_size=0.2):
         images_paths_images.extend(img_path)
         images_paths_annots.extend(annot_path)
         images_paths_cls.extend(cls)
-
-    train_imgs_file, test_imgs_file, train_boxes_file, test_boxes_file, train_cls_file, test_cls_file = train_test_split(images_paths_images, images_paths_annots, images_paths_cls, test_size=test_size, random_state=42)
-
+    train_imgs_file, test_imgs_file, train_boxes_file, test_boxes_file, train_cls_file, test_cls_file = train_test_split(images_paths_images, images_paths_annots, images_paths_cls, stratify=images_paths_cls, test_size=test_size, random_state=42)
+    print(collections.Counter(train_cls_file), collections.Counter(test_cls_file))
     assert len(train_imgs_file) == len(train_boxes_file) == len(train_cls_file)
     assert len(test_imgs_file) == len(test_boxes_file) == len(test_cls_file)
-
     create_txt_dataset((train_imgs_file, train_boxes_file, train_cls_file), os.path.join(project_path, "database/train.txt"))
     create_txt_dataset((test_imgs_file, test_boxes_file, test_cls_file), os.path.join(project_path, "database/test.txt"))
 

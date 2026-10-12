@@ -17,6 +17,9 @@ src/model.py
 # Notebooks
 eval_vit_.ipynb
 train_vit_.ipynb
+train_n_vitp.ipynb
+train_first.ipynb
+train_second.ipynb
 
 **/__pycache__
 **/.DS_Store

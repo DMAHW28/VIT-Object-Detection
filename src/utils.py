@@ -32,8 +32,8 @@ def draw_boxes_on_tensor(img_tensor, pred_box, pred_cls, gt_box=None, gt_cls=Non
         ax.text(xmin*img.shape[1], ymax*img.shape[0]+10, f"GT: {INV_LABEL_KEYS[int(gt_cls)]}", color='g', fontsize=8, weight="bold")
 
     fig.canvas.draw()
-    img_with_boxes = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).copy()  # <-- fix warning
-    img_with_boxes = img_with_boxes.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    img_with_boxes = np.asarray(fig.canvas.buffer_rgba()).copy()
+    img_with_boxes = img_with_boxes[:, :, :3]
     plt.close(fig)
     img_with_boxes = torch.from_numpy(img_with_boxes).permute(2, 0, 1).float() / 255.
     return img_with_boxes

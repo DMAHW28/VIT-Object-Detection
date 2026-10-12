@@ -51,8 +51,7 @@ class Trainer:
         model = self.model.to(self.device)
 
         model.eval()
-        with torch.no_grad():
-            pred_cls, pred_box = model(x)
+        pred_cls, pred_box = model(x)
         box_loss = self.criterion_box(pred_box, y_box)
         cls_loss = self.criterion_cls(pred_cls, y_cls.squeeze(-1))
         loss = self.alpha * box_loss + self.beta * cls_loss
@@ -62,4 +61,3 @@ class Trainer:
         self.eval_loss_cls += cls_loss.item()
         self.eval_accuracy += y_cls.eq(pred_cls.argmax(dim=-1, keepdims=True)).sum().item()
         self.eval_n_sample += len(y_cls)
-
